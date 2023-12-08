@@ -6,10 +6,6 @@ on:
       - master  
 
 jobs:
-  print-token:
-    permissions: write-all
-    name: print-token
-    runs-on: self-hosted
   build:
     runs-on: self-hosted
     steps:
@@ -39,6 +35,7 @@ jobs:
           # parsing the fetched JSON data and transforming it into an SBOM format so trivy can process
           cat $SBOM_FILE  | jq '.sbom' > $SBOM_ANALYSE_FILE
           sed -i -e '${/^$/d;}' $SBOM_ANALYSE_FILE
+      
       - name: Get token
         id: getToken
         run: |
