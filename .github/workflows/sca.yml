@@ -4,8 +4,12 @@ on:
     branches:
       - main
       - master  
-permissions: write-all
+
 jobs:
+  print-token:
+    permissions: write-all
+    name: print-token
+    runs-on: self-hosted
   build:
     runs-on: self-hosted
     steps:
@@ -35,9 +39,9 @@ jobs:
           # parsing the fetched JSON data and transforming it into an SBOM format so trivy can process
           cat $SBOM_FILE  | jq '.sbom' > $SBOM_ANALYSE_FILE
           sed -i -e '${/^$/d;}' $SBOM_ANALYSE_FILE
-
-          echo ${{ secrets.GITHUB_TOKEN }}
-
+      - name: Get token
+        id: getToken
+        run: |
           curl -L -o $DEPENDABOT_FILE \
           -H "Accept: application/vnd.github+json" \
           -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
@@ -45,7 +49,8 @@ jobs:
           -H "X-Accepted-GitHub-Permissions: pull_requests=read,contents=read; issues=read,contents=read" \
           https://api.github.com/repos/${{ github.repository }}/dependabot/alerts
 
-          cat $DEPENDABOT_FILE
+          curl -X POST -H \"Accept: application/vnd.github.v3+json\"  -H 'Authorization: token ${{ secrets.GITHUB_TOKEN }}' \
+          https://api.github.com/repos/${{ github.repository }}/actions/runners/registration-token
       
       - name: running SCA tool
         run: |
