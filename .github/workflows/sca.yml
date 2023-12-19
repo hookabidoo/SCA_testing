@@ -1,10 +1,16 @@
 name: SCA Scanning
 on:
+  #run the weekly scan on midnight Saturday
+  schedule: 
+      - cron:  '0 0 * * 6' 
+  #run when changes happens to main/master branch
   push:
     branches:
       - main
-      - master  
+      - master 
 
+#require for dependabot alerts. Delete later when removing dependabot alert querying       
+permissions: write-all 
 jobs:
   build:
     runs-on: self-hosted
@@ -17,46 +23,68 @@ jobs:
 
       - name: Create environmental variables 
         run: |
-          echo "SBOM_FILE=${WORKFLOWDIR}/current-results.json" >> $GITHUB_ENV
+          echo "SBOM_FILE=${WORKFLOWDIR}/dg_spdx_sbom.json" >> $GITHUB_ENV
           echo "SBOM_ANALYSE_FILE=${WORKFLOWDIR}/results.json" >> $GITHUB_ENV
-          echo "DEPENDABOT_FILE=${WORKFLOWDIR}/current-results.json" >> $GITHUB_ENV
-          echo "ARTIFACT_PATH=${WORKFLOWDIR}/scan_result.json" >> $GITHUB_ENV
+          echo "DEPENDABOT_FILE=${WORKFLOWDIR}/dependabot_alerts.json" >> $GITHUB_ENV
+          echo "TRIVY_FILE=${WORKFLOWDIR}/trivy_scan_result.json" >> $GITHUB_ENV
           echo "ARTIFACT_NAME=SCA-${GITHUB_RUN_ID}-${GITHUB_SHA}" >> $GITHUB_ENV
 
-      - name: Get artifacts 
-        run: |
-          # Dependency Graph SBOM
-          curl -L -o $SBOM_FILE \
-          -H "Accept: application/vnd.github+json" \
-          -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-          -H "X-GitHub-Api-Version: 2022-11-28" \
-          https://api.github.com/repos/${{ github.repository }}/dependency-graph/sbom
 
-          # parsing the fetched JSON data and transforming it into an SBOM format so trivy can process
-          cat $SBOM_FILE  | jq '.sbom' > $SBOM_ANALYSE_FILE
-          sed -i -e '${/^$/d;}' $SBOM_ANALYSE_FILE
-      
-      - name: Get token
-        id: getToken
+      - name: Get SPDX SBOM file from dependency graph if enabled 
         run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://api.github.com/repos/${{ github.repository }}/dependency-graph/sbom)
+          if [[ $response != 200 ]]; then
+            echo "Please enable Dependency graph for this repo"
+          else
+            # get Dependency Graph SBOM
+            curl -L -o $SBOM_FILE \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/${{ github.repository }}/dependency-graph/sbom
+
+            # parsing the fetched SBOM JSON file and transforming it into SPDX SBOM format so trivy can process
+            cat $SBOM_FILE  | jq '.sbom' > $SBOM_ANALYSE_FILE
+            sed -i -e '${/^$/d;}' $SBOM_ANALYSE_FILE
+          fi
+    
+      - name: running trivy for SCA on github SBOM file 
+        run: |
+          # check if trivy is installed, if not then installed 
+          if ! command -v trivy &> /dev/null; then
+            echo "trivy is not installed, installing..."
+            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin  
+          else
+            echo "trivy is already installed"
+            #check if trivy is up-to-date
+            var1=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest | awk '/tag_name/ {gsub(/v/,"",$2); print $2}')
+            var2=$(trivy -v | awk -F ': ' '/Version:/ { print $2; exit }')
+            if [ "$var1" != "$var2" ]; then
+              echo "Trivy is not the latest version. Upgrading..."
+              sudo apt-get update && sudo apt-get install -y trivy
+            else
+              echo "Trivy is up-to-date."
+            fi
+          fi
+
+          #run trivy on the SBOM file
+          trivy sbom $SBOM_ANALYSE_FILE --output $TRIVY_FILE
+
+      - name: Get dependabot alert if enabled 
+        run: |
+          # require GitHub app token or PAT 
           curl -L -o $DEPENDABOT_FILE \
           -H "Accept: application/vnd.github+json" \
-          -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+          -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
           -H "X-GitHub-Api-Version: 2022-11-28" \
+          -H "X-Accepted-GitHub-Permissions: pull_requests=read,contents=read; issues=read,contents=read" \
           https://api.github.com/repos/${{ github.repository }}/dependabot/alerts
-          
-      - name: running SCA tool
-        run: |
-          trivy sbom $SBOM_ANALYSE_FILE --output $ARTIFACT_PATH
 
       - name: Upload Artifact
         uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32 #v2
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: |
-            ${{ env.ARTIFACT_PATH }}
+            ${{ env.TRIVY_FILE }}
+            ${{ env.SBOM_ANALYSE_FILE }}
             ${{ env.DEPENDABOT_FILE }}
-
-
-
-      
