@@ -1,0 +1,52 @@
+name: SAST Scanning
+on:
+  #run the weekly scan on midnight Saturday
+  schedule: 
+      - cron:  '0 0 * * 6' 
+  #run when changes happens to main/master branch
+  push:
+    branches:
+      - main
+      - master 
+
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 #v2
+
+      - name: Create temporary directory
+        run: echo "WORKFLOWDIR=$(mktemp -d)" >> $GITHUB_ENV
+
+      - name: Create environmental variables 
+        run: |
+          echo "SAST_FILE=${WORKFLOWDIR}/result.json" >> $GITHUB_ENV
+          echo "ARTIFACT_PATH=${WORKFLOWDIR}/scan_result.json" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=SAST-${GITHUB_RUN_ID}-${GITHUB_SHA}" >> $GITHUB_ENV
+    
+      - name: check if semgrep installed
+        run: |
+         if ! command -v semgrep &> /dev/null; then
+           echo "semgrep is not installed, installing..."
+           python3 -m pip install semgrep  
+         else
+           echo "semgrep is already installed"
+         fi
+
+      - name: Run full scan
+        run: |
+          semgrep --json --output $ARTIFACT_PATH --metrics=off --config="p/default"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32 #v2
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.ARTIFACT_PATH }}
+    
+      - name: Download report
+        uses: actions/download-artifact@v2
+        with: 
+          name: ${{ env.ARTIFACT_NAME }}
+
+      
