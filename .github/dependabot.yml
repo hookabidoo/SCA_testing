@@ -9,7 +9,6 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly" # Set the update frequency as needed
-    versioning-strategy: "widen"
     ignore:
       - dependency-name: "Package.Name" # Ignore specific packages from updates
         versions: ["<1.0.0"]
